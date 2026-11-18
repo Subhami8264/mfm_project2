@@ -1,0 +1,321 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Project 2 — Flow Matching and Creative Point-Cloud Generation</title>
+<style>
+  :root{--ink:#16202b;--muted:#5b6b7c;--line:#d9e1ea;--bg:#fff;--panel:#f4f7fa;
+        --accent:#1a4e8a;--warn:#b23a00}
+  @media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
+        --ink:#e6edf3;--muted:#9bb0c3;--line:#2b3947;--bg:#0f151b;--panel:#161f28;
+        --accent:#79b1f0;--warn:#ff9a5c}}
+  :root[data-theme="dark"]{--ink:#e6edf3;--muted:#9bb0c3;--line:#2b3947;--bg:#0f151b;
+        --panel:#161f28;--accent:#79b1f0;--warn:#ff9a5c}
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);
+       font:16px/1.62 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif}
+  .wrap{max-width:880px;margin:0 auto;padding:44px 16px 90px}
+  header{border-bottom:1px solid var(--line);padding-bottom:22px}
+  h1{font-size:1.8rem;line-height:1.25;margin:0 0 8px;letter-spacing:-.01em}
+  .sub{color:var(--muted);margin:0 0 3px}
+  h2{font-size:1.26rem;margin:38px 0 10px;color:var(--accent);
+     border-bottom:1px solid var(--line);padding-bottom:5px}
+  h3{font-size:1.02rem;margin:24px 0 6px}
+  h4{font-size:.95rem;margin:18px 0 5px;color:var(--muted);
+     text-transform:uppercase;letter-spacing:.05em}
+  p{margin:0 0 13px}
+  a{color:var(--accent)}
+  ul{margin:0 0 14px;padding-left:22px}li{margin-bottom:6px}
+  table{border-collapse:collapse;width:100%;margin:13px 0 18px;font-size:.9rem}
+  th,td{border:1px solid var(--line);padding:6px 9px;text-align:left;vertical-align:top}
+  th{background:var(--panel);font-weight:600}
+  td.n{font-variant-numeric:tabular-nums}
+  figure{margin:18px 0;padding:0}
+  figure img{width:100%;height:auto;border:1px solid var(--line);border-radius:5px;background:#fff}
+  figcaption{color:var(--muted);font-size:.87rem;margin-top:6px}
+  code,pre{font-family:ui-monospace,SFMono-Regular,Consolas,monospace;font-size:.86rem}
+  pre{background:var(--panel);border:1px solid var(--line);border-radius:5px;
+      padding:11px 13px;overflow-x:auto;white-space:pre-wrap}
+  .eq{background:var(--panel);border:1px solid var(--line);border-radius:5px;
+      padding:10px 14px;margin:12px 0;text-align:center;font-family:ui-monospace,Consolas,monospace;
+      font-size:.92rem}
+  .note{border-left:3px solid var(--warn);padding:3px 0 3px 13px;margin:16px 0}
+  .key{background:var(--panel);border:1px solid var(--line);border-radius:5px;padding:13px 15px;margin:16px 0}
+  .toc{background:var(--panel);border:1px solid var(--line);border-radius:5px;padding:12px 16px;margin:22px 0}
+  .toc ol{margin:6px 0 0;padding-left:22px}.toc li{margin-bottom:3px}
+  footer{margin-top:50px;padding-top:16px;border-top:1px solid var(--line);
+         color:var(--muted);font-size:.87rem}
+  @media print{
+    :root{--ink:#000;--muted:#444;--line:#bbb;--bg:#fff;--panel:#f2f2f2;--accent:#14406f;--warn:#8a2c00}
+    body{font-size:10.5pt}.wrap{max-width:none;padding:0}
+    h2,h3,h4{page-break-after:avoid}
+    figure,table,.key,.note,.eq{page-break-inside:avoid}
+    .toc{display:none}a{color:#14406f;text-decoration:none}
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header>
+  <h1>Project 2 — Flow Matching and Creative Point-Cloud Generation</h1>
+  <p class="sub">CSCI 5499A / ENGR 6999F · Multimodal Foundation Models · University of Mississippi</p>
+  <p class="sub">Subhami Mohan · 18 November 2026</p>
+</header>
+
+<nav class="toc"><strong>Contents</strong>
+<ol>
+  <li><a href="#setup">Setup and conventions</a></li>
+  <li><a href="#p1">Part 1 — learning a 2D flow from scratch</a></li>
+  <li><a href="#p2">Part 2 — a creative target, animated</a></li>
+  <li><a href="#p3">Part 3 — does reflow straighten the paths?</a></li>
+  <li><a href="#limits">Limits and what I would do differently</a></li>
+  <li><a href="#decl">Declaration and reproduction</a></li>
+</ol></nav>
+
+<h2 id="setup">1. Setup and conventions</h2>
+<p>This project trains a small flow-matching model that transports samples of a standard 2D Gaussian onto a target
+point distribution, and then asks what the shape of the learned transport costs at sampling time. Everything runs on
+CPU; the model has 33,794 parameters.</p>
+<div class="eq">t = 0 is noise, t = 1 is data<br>
+x<sub>t</sub> = (1 − t)·x<sub>0</sub> + t·x<sub>1</sub> &nbsp;&nbsp;&nbsp; u = x<sub>1</sub> − x<sub>0</sub><br>
+L = E ‖ v<sub>θ</sub>(x<sub>t</sub>, t) − (x<sub>1</sub> − x<sub>0</sub>) ‖²<br>
+z<sub>k+1</sub> = z<sub>k</sub> + Δt · v<sub>θ</sub>(z<sub>k</sub>, t<sub>k</sub>), &nbsp; z<sub>0</sub> ~ N(0, I)</div>
+<table>
+  <tr><th>Device</th><td>CPU, Intel64 Family 6 Model 183 Stepping 1, 8 torch threads</td></tr>
+  <tr><th>Platform</th><td>Windows-10-10.0.26300-SP0</td></tr>
+  <tr><th>Python / torch</th><td>3.11.17 / 2.14.1+cpu</td></tr>
+  <tr><th>numpy / matplotlib</th><td>2.4.6 / 3.11.2</td></tr>
+  <tr><th>Architecture</th><td>MLP 3 → 128 → 128 → 128 → 2, SiLU; input (x, y, t), output (v<sub>x</sub>, v<sub>y</sub>)</td></tr>
+  <tr><th>Parameters</th><td class="n">33,794</td></tr>
+  <tr><th>Training</th><td>30,000 steps, batch 256, Adam lr 2×10⁻³</td></tr>
+  <tr><th>Measured runtime</th><td class="n">Part 1 training 27.93 s · Part 2 training 26.40 s · reflow 5.28 s</td></tr>
+</table>
+<p>Recorded automatically into <code>results/environment.json</code>. Random seeds are fixed and stated per
+experiment: seed 0 for Part 1, seed 1 for the Part 2 target and training, seeds 0 and 1 for every Part 3 comparison.
+Checkpoints are saved so that re-plotting or changing the sampling step count never requires retraining.</p>
+
+<h2 id="p1">2. Part 1 — learning a 2D flow from scratch</h2>
+
+<h4>Task 1 — source, target, and training pairs</h4>
+<p>The source is a standard 2D Gaussian. The target is a ring of radius 2.0 with radial jitter of standard deviation
+0.12: an angle is drawn uniformly on [0, 2π) and a radius from N(2.0, 0.12²). The sampled target has mean radius
+<strong>1.9998</strong> and spans roughly [−2.2, 2.2] in both axes. Source and target points are paired
+<em>at random</em>, a time is drawn uniformly on [0, 1], and the interpolated point and target velocity are formed
+from the equations above.</p>
+
+<figure><img src="figures/p1_t1_source_target.png" alt="Gaussian source cloud beside the ring target">
+<figcaption>Figure 1. Source (t = 0) and target (t = 1).</figcaption></figure>
+
+<figure><img src="figures/p1_t1_pairs.png" alt="Twelve straight paths joining random source points to random target points">
+<figcaption>Figure 2. Twelve randomly paired training paths.</figcaption></figure>
+
+<p><strong>Why the velocity is constant along each training path.</strong> Differentiating the interpolation gives
+dx<sub>t</sub>/dt = x<sub>1</sub> − x<sub>0</sub>, which contains no t. Each path is a straight line travelled at
+uniform speed, so the regression target is the same vector at every point on it. Checked numerically on pair 0, with
+x<sub>0</sub> = (−1.1258, −1.1524) and x<sub>1</sub> = (−1.3962, −1.6236): the point at t = 0.1 is (−1.1529, −1.1995)
+and at t = 0.9 is (−1.3692, −1.5765), while the target u is (−0.2704, −0.4713) at both.</p>
+<p>This is a property of each <em>individual</em> pair, not of the field. Different pairs crossing the same location
+carry different u, which is what the next two tasks turn on.</p>
+
+<h4>Task 2 — training the velocity model</h4>
+<figure><img src="figures/p1_t2_loss.png" alt="Training loss falling then plateauing near 3.88">
+<figcaption>Figure 3. Training loss. Mean over the first 500 steps 4.1362; over the last 500, 3.8807.</figcaption></figure>
+<div class="key"><p style="margin:0"><strong>The loss plateaus at 3.88, not at zero, and that is expected rather than
+a failure.</strong> With random pairing, many different (x<sub>0</sub>, x<sub>1</sub>) pairs pass through the same
+(x<sub>t</sub>, t) while demanding different velocities. No function of (x, y, t) can satisfy all of them, so the
+minimiser at each location is the <em>conditional mean</em> of the target velocities there, and the spread about that
+mean is irreducible. What the network predicts is therefore an averaged velocity field, not any individual pair's
+displacement.</p></div>
+
+<h4>Task 3 — generating new points</h4>
+<p>Starting from 4,000 fresh Gaussian samples never seen in training, integrated with 50 Euler steps. No endpoint is
+supplied at any time: the network sees only (x, y, t).</p>
+<figure><img src="figures/p1_t3_cloud_over_time.png" alt="The point cloud transforming from Gaussian to ring">
+<figcaption>Figure 4. The generated cloud at t = 0, 0.2, 0.4, 0.7, 1.0.</figcaption></figure>
+<figure><img src="figures/p1_t3_velocity_field.png" alt="Quiver plots of the learned velocity field at three times">
+<figcaption>Figure 5. The learned velocity field at t = 0, 0.5 and 0.9. Early on the field is weak and broadly outward;
+by t = 0.9 it points sharply onto the ring from both sides.</figcaption></figure>
+<table>
+  <tr><th>Measure</th><th>Value</th></tr>
+  <tr><td>Generated mean radius</td><td class="n">2.0124 (target 2.0)</td></tr>
+  <tr><td>Histogram discrepancy vs independent target samples</td><td class="n">0.1905</td></tr>
+  <tr><td>Mean excess path length</td><td class="n">0.3742 ± 0.2187</td></tr>
+</table>
+<figure><img src="figures/p1_t3_trajectories.png" alt="Curved sampling trajectories beside straight training interpolations">
+<figcaption>Figure 6. Learned sampling trajectories (left) against straight training interpolations (right).</figcaption></figure>
+<p><strong>The distinction the brief asks for.</strong> The training paths are straight by construction — each joins
+one x<sub>0</sub> to one x<sub>1</sub>. The sampling trajectories are not those lines. At generation time the particle
+has no endpoint and follows the learned field, which at every location is an average over all pairs passing through
+it, so it is steered continuously and its route bends. Measured on a common grid, a trajectory here is on average
+<strong>0.374 longer</strong> than the straight line between its own start and end. Straight training paths do not
+imply straight sampling paths, and that gap is exactly what Part 3 tests.</p>
+
+<h2 id="p2">3. Part 2 — a creative target, animated</h2>
+
+<h4>Task 1 — the target</h4>
+<p>The target is the letter <strong>S</strong>, rendered to a 240 × 240 boolean mask by matplotlib's own text engine,
+of which <strong>25.13%</strong> is foreground. Foreground pixels are drawn uniformly with replacement and jittered by
+up to one pixel, so the result is a continuous cloud rather than a lattice of pixel centres; the image square maps to
+[−2.2, 2.2]² with the y axis flipped. 20,000 points are sampled. Because the glyph is generated locally, no external
+image is used and there is no third-party licensing to record.</p>
+<figure><img src="figures/p2_t1_target.png" alt="The rendered S mask and the point distribution sampled from it">
+<figcaption>Figure 7. The mask and the 20,000-point target distribution.</figcaption></figure>
+<figure><img src="figures/p2_t1_loss.png" alt="Part 2 training loss plateauing near 2.45">
+<figcaption>Figure 8. Training loss for the letter target; plateau 2.4535 over the last 500 steps. Lower than the ring's
+3.88 because the target is more compact, so random pairs are shorter on average.</figcaption></figure>
+
+<h4>Task 2 — the animation</h4>
+<figure><img src="figures/p2_t2_frames.png" alt="Six frames of coloured particles moving from Gaussian noise into an S">
+<figcaption>Figure 9. Six frames of the transport, 4,000 particles over 60 Euler steps.</figcaption></figure>
+<figure><img src="figures/p2_t2_animation.gif" alt="Animated GIF of the transport">
+<figcaption>Figure 10. The full animation (<code>figures/p2_t2_animation.gif</code>).</figcaption></figure>
+<p><strong>How colour is assigned.</strong> Each particle is coloured once, at t = 0, by the angle of its own starting
+point in the Gaussian mapped through an HSV wheel. That colour is then carried by the same particle for the whole
+animation, so the frames show where each region of the noise ends up — the colour wheel survives into the letter,
+which means the transport is broadly orientation-preserving rather than scrambling.</p>
+<p><strong>Colour does not participate in training.</strong> The network maps (x, y, t) to a 2D velocity and has no
+colour input and no colour output. Colour is purely a visualisation attribute attached afterwards to particle indices.</p>
+<p>Rendering the GIF took 3.3 s while integrating the field for all 61 frames takes milliseconds — the asymmetry the
+brief warns about.</p>
+
+<h4>Task 3 — the sampling trade-off</h4>
+<p>With the trained weights fixed and the <em>same</em> 6,000 initial Gaussian samples used at every setting, the
+number of Euler steps is varied. Quality is a fixed-grid histogram discrepancy (total variation) against 6,000
+independent samples of the target, on a 40 × 40 grid over [−3, 3]² plus a bucket counting points outside that square.
+The same grid is used for every comparison.</p>
+<table>
+  <tr><th>Euler steps</th><th>Network evaluations</th><th>Sampling time</th><th>Histogram discrepancy</th><th>Outside grid</th></tr>
+  <tr><td class="n">1</td><td class="n">1</td><td class="n">1.1 ms</td><td class="n">0.9692</td><td class="n">0.00%</td></tr>
+  <tr><td class="n">5</td><td class="n">5</td><td class="n">5.6 ms</td><td class="n">0.3265</td><td class="n">0.00%</td></tr>
+  <tr><td class="n">10</td><td class="n">10</td><td class="n">10.5 ms</td><td class="n">0.2132</td><td class="n">0.00%</td></tr>
+  <tr><td class="n">25</td><td class="n">25</td><td class="n">26.6 ms</td><td class="n">0.1583</td><td class="n">0.00%</td></tr>
+  <tr><td class="n">50</td><td class="n">50</td><td class="n">52.5 ms</td><td class="n">0.1512</td><td class="n">0.00%</td></tr>
+</table>
+<figure><img src="figures/p2_t3_step_counts.png" alt="Point clouds at 1, 5, 10, 25 and 50 Euler steps">
+<figcaption>Figure 11. The same initial noise integrated with 1, 5, 10, 25 and 50 steps.</figcaption></figure>
+<figure><img src="figures/p2_t3_tradeoff.png" alt="Discrepancy and sampling time against step count">
+<figcaption>Figure 12. Quality against cost. Sampling time is linear in the step count; quality is not.</figcaption></figure>
+<p><strong>What changes with fewer steps.</strong> Sampling time scales linearly — one evaluation per step — but
+quality does not. Going from 1 to 5 steps removes two thirds of the discrepancy; going from 25 to 50 removes about
+4%. With a single step the sample is just z<sub>0</sub> + v(z<sub>0</sub>, 0), one linear push along the field at
+t = 0, which cannot follow a curved trajectory at all and leaves the cloud barely moved.</p>
+<p><strong>Which errors do not come from the step count.</strong> The curve flattens towards a floor near 0.15 rather
+than towards zero. That residual is not discretisation error, and adding steps will not remove it. It comes from two
+other places: the learned field is only an approximation of the true transport, and the target itself is a
+discretised representation — a 240 × 240 mask, 20,000 sampled points, one-pixel jitter, and a 40 × 40 evaluation grid
+that cannot resolve finer structure than its own bins. No point outside the grid was recorded at any step count, so
+the comparison is not losing mass.</p>
+
+<h2 id="p3">4. Part 3 — does reflow straighten the paths?</h2>
+
+<h4>Task 1 — hypothesis and the paired dataset</h4>
+<p><strong>Hypothesis.</strong> Reflow retrains on pairs the model itself produced, so each noise point has one
+designated destination instead of competing with every other pair passing through the same place. If that competition
+is what bends the trajectories, the reflow model's paths should be measurably straighter, and straighter paths should
+survive coarse Euler integration better — comparable quality at fewer network evaluations.</p>
+<p>The Part 2 model was frozen. 20,000 fresh Gaussian sources were drawn and integrated with a fine 200-step grid, and
+each source was saved <em>together with its own generated endpoint</em>. Rows are never reshuffled and the real target
+shape is not used here: the reflow model sees only what the baseline generated. Generating the dataset cost
+<strong>0.683 s</strong> and 4.0 million network evaluations.</p>
+<figure><img src="figures/p3_t1_pairs.png" alt="Curved baseline trajectories beside the straight interpolations between their endpoints">
+<figcaption>Figure 13. The baseline's own curved trajectories (left) define the pairs; the reflow model trains on the
+straight interpolations between those same endpoints (right).</figcaption></figure>
+
+<h4>Task 2 — training and comparison</h4>
+<p>Three models with identical architecture are compared on held-out Gaussian starting points, at the same step
+counts, averaged over two seeds. <strong>baseline</strong> is the Part 2 model. <strong>reflow</strong> is a fresh
+model trained for 6,000 steps on the paired endpoints. <strong>baseline+6k</strong> is the compute-matched control:
+the baseline trained for 6,000 <em>more</em> steps on its original objective, so that any improvement attributable
+merely to extra optimisation can be separated out.</p>
+<table>
+  <tr><th>Euler steps</th><th>baseline</th><th>baseline+6k (control)</th><th>reflow</th></tr>
+  <tr><td class="n">1</td><td class="n">0.9700 ± 0.0003</td><td class="n">0.9672 ± 0.0008</td><td class="n"><strong>0.2187 ± 0.0002</strong></td></tr>
+  <tr><td class="n">5</td><td class="n">0.3177 ± 0.0035</td><td class="n">0.3073 ± 0.0006</td><td class="n"><strong>0.1711 ± 0.0044</strong></td></tr>
+  <tr><td class="n">10</td><td class="n">0.2060 ± 0.0005</td><td class="n">0.1997 ± 0.0013</td><td class="n"><strong>0.1682 ± 0.0042</strong></td></tr>
+  <tr><td class="n">25</td><td class="n">0.1653 ± 0.0051</td><td class="n">0.1648 ± 0.0070</td><td class="n">0.1658 ± 0.0041</td></tr>
+  <tr><td class="n">50</td><td class="n">0.1598 ± 0.0068</td><td class="n">0.1627 ± 0.0080</td><td class="n">0.1652 ± 0.0040</td></tr>
+</table>
+<table>
+  <tr><th>Path straightness (mean excess length, 200-step common grid)</th><th>Value</th></tr>
+  <tr><td>baseline</td><td class="n">0.3735 ± 0.0056</td></tr>
+  <tr><td>baseline+6k (control)</td><td class="n">0.3846 ± 0.0060</td></tr>
+  <tr><td>reflow</td><td class="n"><strong>0.0002 ± 0.0000</strong></td></tr>
+</table>
+<figure><img src="figures/p3_t2_comparison.png" alt="Quality against step count for three models, and a straightness bar chart">
+<figcaption>Figure 14. Quality against sampling budget, and path straightness.</figcaption></figure>
+<figure><img src="figures/p3_t2_trajectories.png" alt="Curved baseline trajectories beside near-perfectly straight reflow trajectories">
+<figcaption>Figure 15. Baseline trajectories bend; reflow trajectories are visually straight lines.</figcaption></figure>
+<p><strong>Cost, reported separately from inference.</strong> Paired dataset generation 0.683 s, reflow training
+5.28 s — <strong>5.96 s total extra</strong>. The compute-matched control cost 5.31 s of training. Sampling time per
+run is unchanged between models at a given step count (for example 53.9 ms for the baseline and 53.8 ms for reflow at
+50 steps), because the architecture is identical; reflow buys quality at low step counts, not faster steps.</p>
+
+<h4>Task 3 — what the evidence supports</h4>
+<div class="key"><p style="margin:0"><strong>The hypothesis is supported, in the specific form it was stated.</strong>
+Reflow removes essentially all of the path curvature — mean excess length falls from 0.3735 to <strong>0.0002</strong>,
+a 99.9% reduction, with the trajectories visually straight in Figure 15 — and it converts that into large quality
+gains exactly where coarse integration hurts. At a single network evaluation the discrepancy falls from 0.9700 to
+<strong>0.2187</strong>. Reflow at 5 evaluations (0.1711) sits between the baseline at 10 (0.2060) and at 25 (0.1653),
+so roughly 2–5× fewer evaluations are needed for comparable quality.</p></div>
+<p><strong>The compute-matched control rules out the obvious alternative.</strong> baseline+6k received the same 6,000
+extra optimisation steps and did not straighten at all (0.3846, marginally <em>worse</em> than the baseline's 0.3735),
+nor did it improve meaningfully at one step (0.9672 against 0.9700). The gain is attributable to the change of
+training pairs, not to additional training.</p>
+<p><strong>Where the gain stops.</strong> At 25 and 50 steps the three models are indistinguishable. Reflow differs
+from the baseline by +0.0005 and +0.0054, against combined seed-to-seed spreads of 0.0065 and 0.0079 — both
+differences are <em>inside</em> the noise, so this run gives no evidence that reflow either helps or harms once the
+sampling budget is generous. Reflow buys nothing when there are already enough steps to follow a curved path
+accurately.</p>
+<h4>Alternative explanations and limits</h4>
+<ul>
+  <li><strong>Reflow inherits the baseline's errors.</strong> It trains on the baseline's generated endpoints, never
+  on the real letter. Wherever the baseline places mass slightly off the target, reflow learns to reach that wrong
+  place efficiently. Its floor near 0.165 is close to the baseline's converged quality near 0.160, which is consistent
+  with exactly this ceiling.</li>
+  <li><strong>Straighter is not the same as more accurate.</strong> The straightness measure and the discrepancy
+  measure answer different questions, and both tables are needed. A model could be perfectly straight and transport
+  to the wrong distribution.</li>
+  <li><strong>Two seeds is a very small sample.</strong> Differences smaller than the reported spread are not treated
+  as results anywhere above.</li>
+  <li><strong>One target, one architecture, one reflow round.</strong> Nothing here shows that the effect size would
+  hold for a harder target, a different capacity, or a second reflow round.</li>
+  <li><strong>The dataset generation cost is real.</strong> 4.0 million network evaluations were spent building the
+  pairs. It is cheap here because the model is tiny; it is reported separately rather than folded into training time.</li>
+</ul>
+
+<h2 id="limits">5. Limits and what I would do differently</h2>
+<ul>
+  <li>The histogram discrepancy depends on the grid. A 40 × 40 grid over [−3, 3]² cannot resolve structure finer than
+  its bins, which is part of why the curve flattens near 0.15. Repeating the sweep at two grid resolutions would show
+  how much of the floor is the metric rather than the model.</li>
+  <li>Two seeds were used throughout; four or five would make the 25- and 50-step comparison conclusive instead of
+  merely inconclusive.</li>
+  <li>Only one reflow round was run. The interesting follow-up is whether a second round straightens further or begins
+  to degrade quality as errors compound.</li>
+  <li>The Part 1 and Part 2 targets differ in compactness, which is why their loss plateaus differ (3.88 against 2.45).
+  That number is a property of the target geometry, not a quality score, and should not be compared across targets.</li>
+</ul>
+
+<h2 id="decl">6. Declaration and reproduction</h2>
+<p>Generative AI (Claude, Anthropic) was used while preparing this project: for drafting and debugging the
+implementation and for help structuring this report. All experiments were run by me on my own machine, and every
+number reported here comes from the JSON files in <code>results/</code>, which are included in the code submission. I
+understand the computations implemented here and can explain them.</p>
+<pre>python part_1.py env
+python part_1.py all
+python part_2.py all --text S
+python part_3.py all</pre>
+<p>Total runtime about 70 s of training plus a few seconds of evaluation, on the CPU listed in section 1. Figures are
+written to <code>figures/</code> and every number to <code>results/</code>.</p>
+
+<footer>
+<p>The Part 2 target glyph is rendered locally by matplotlib; no external image or third-party material is used
+anywhere in this project, so no usage permissions need to be recorded.</p>
+<p>Coursework for CSCI 5499A / ENGR 6999F, Fall 2026, University of Mississippi.</p>
+</footer>
+
+</div>
+</body>
+</html>
